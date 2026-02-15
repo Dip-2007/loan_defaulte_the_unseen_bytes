@@ -1,0 +1,142 @@
+body {
+    background-color: #000000;
+    color: #ffffff;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    min-height: 100vh;
+}
+
+.glass-card {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02));
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-top: 1px solid rgba(255, 255, 255, 0.3);
+    border-left: 1px solid rgba(255, 255, 255, 0.3);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    border-radius: 16px;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.transparent-card {
+    background: transparent !important;
+    background-color: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+}
+
+.glass-header {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 10px !important;
+    /* Significantly reduced roundness */
+    padding: 10px;
+    margin-bottom: 20px;
+    text-align: center;
+    backdrop-filter: blur(10px);
+    overflow: hidden;
+}
+
+.glass-body-container {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px !important;
+    /* Significantly reduced roundness */
+    backdrop-filter: blur(10px);
+    padding: 15px;
+    overflow: hidden;
+}
+
+.glass-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.card-header {
+    background: transparent;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #a6accd;
+}
+
+.neon-text {
+    text-shadow: 0 0 10px rgba(0, 210, 255, 0.7), 0 0 20px rgba(0, 210, 255, 0.5);
+    color: #ffffff;
+}
+
+.full-height {
+    height: 100%;
+}
+
+.scrollable-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #2b2b3b;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #44445a;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #5a5a75;
+}
+
+/* Plotly overrides */
+.js-plotly-plot .plotly .main-svg {
+    background: transparent !important;
+}
+
+/* Dropdown dark mode fixes */
+.Select-control {
+    background-color: #2b2b3b !important;
+    border: 1px solid #44445a !important;
+    color: white !important;
+}
+
+.Select-menu-outer {
+    background-color: #2b2b3b !important;
+    color: white !important;
+}
+
+.Select-value-label {
+    color: white !important;
+}
+
+/* Glowing Border Utilities */
+.glow-border-success {
+    border: 1px solid #00ff9d !important;
+    box-shadow: 0 0 15px rgba(0, 255, 157, 0.4), inset 0 0 10px rgba(0, 255, 157, 0.2) !important;
+}
+
+.glow-border-warning {
+    border: 1px solid #ffaa00 !important;
+    box-shadow: 0 0 15px rgba(255, 170, 0, 0.4), inset 0 0 10px rgba(255, 170, 0, 0.2) !important;
+}
+
+.glow-border-danger {
+    border: 1px solid #FF0000 !important;
+    box-shadow: 0 0 15px rgba(255, 0, 0, 0.4), inset 0 0 10px rgba(255, 0, 0, 0.2) !important;
+}
+
+.text-blue-custom {
+    color: #00e5ff !important;
+}
+
+/* Interactive List Items */
+.customer-list-item:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 5px;
+}
