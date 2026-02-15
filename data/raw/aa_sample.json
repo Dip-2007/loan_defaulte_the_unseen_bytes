@@ -1,0 +1,40 @@
+{
+  "customer_id": "CUST_000000",
+  "consent_id": "CONSENT_556352",
+  "timestamp": "2026-02-15T11:58:46.421717",
+  "accounts": [
+    {
+      "fip_id": "ICICI",
+      "account_type": "SAVINGS",
+      "masked_account": "XXXX4104",
+      "balance": 91029.18,
+      "is_primary": true
+    },
+    {
+      "fip_id": "AXIS",
+      "account_type": "SAVINGS",
+      "masked_account": "XXXX2611",
+      "balance": 22257.69,
+      "is_primary": false
+    }
+  ],
+  "mutual_funds": [
+    {
+      "fund_name": "ICICI Prudential",
+      "current_value": 284479.6
+    }
+  ],
+  "tax_records": {
+    "itr": {
+      "2023-24": {
+        "gross_total_income": 854491.11
+      }
+    }
+  },
+  "_metadata": {
+    "total_emi_other_banks": 0.0,
+    "num_banks": 2,
+    "total_balance_all_banks": 113286.87,
+    "has_fintech_loans": false
+  }
+}
