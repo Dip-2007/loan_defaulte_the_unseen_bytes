@@ -1,0 +1,23 @@
+# .dockerignore
+__pycache__
+*.pyc
+*.pyo
+.git
+.github
+.vscode
+*.egg-info
+.pytest_cache
+node_modules
+*.log
+test_*.py
+test_*.txt
+clean_*.py
+col_map.py
+data/raw/
+notebooks/
+airflow/
+feast_repo/
+docker/
+.dockerignore
+docker-compose.yml
+README.md

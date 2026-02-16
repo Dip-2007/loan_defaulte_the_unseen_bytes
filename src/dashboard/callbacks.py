@@ -3,156 +3,268 @@ import plotly.express as px
 import plotly.graph_objects as go
 import dash_bootstrap_components as dbc
 import pandas as pd
+import numpy as np
 try:
-    from data_loader import load_data, get_customer_timeline, get_spending_breakdown
+    from data_loader import load_data, load_feature_importance, get_customer_timeline, get_spending_breakdown
 except ImportError:
-    from .data_loader import load_data, get_customer_timeline, get_spending_breakdown
+    from .data_loader import load_data, load_feature_importance, get_customer_timeline, get_spending_breakdown
+
+CUST_ID_COL = 'LoanID'
+
+# Design palette — muted, elegant
+BAND_COLORS = {
+    'SAFE':      '#10b981',
+    'LOW RISK':  '#4a7cde',
+    'MODERATE':  '#e8930c',
+    'HIGH RISK': '#ea7830',
+    'CRITICAL':  '#dc3545',
+}
+
+def _layout(**overrides):
+    """Build chart layout by merging base defaults with per-chart overrides."""
+    base = dict(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(family='Inter, sans-serif', color='#5f6477', size=11),
+        margin=dict(t=8, b=30, l=40, r=16),
+        xaxis=dict(gridcolor='rgba(0,0,0,0.05)', zeroline=False,
+                   tickfont=dict(size=10, color='#5f6477')),
+        yaxis=dict(gridcolor='rgba(0,0,0,0.05)', zeroline=False,
+                   tickfont=dict(size=10, color='#5f6477')),
+        showlegend=False,
+        hoverlabel=dict(bgcolor='#ffffff', font_color='#1a1d2e',
+                        bordercolor='#e0e0e0'),
+    )
+    base.update(overrides)
+    return base
+
+
+def _empty_fig():
+    fig = go.Figure()
+    fig.update_layout(**_layout())
+    return fig
+
 
 def register_callbacks(app):
     df = load_data()
-    
+    feat_imp = load_feature_importance()
+
+    # ================================================================
+    # KPI + Charts
+    # ================================================================
     @app.callback(
         [Output("total-customers", "children"),
          Output("high-risk-count", "children"),
+         Output("at-risk-pct", "children"),
          Output("potential-loss", "children"),
-         Output("breakdown-low", "children"),
-         Output("breakdown-med", "children"),
-         Output("breakdown-high", "children"),
+         Output("avg-risk-score", "children"),
          Output("risk-distribution-chart", "figure"),
-         Output("employment-bar-chart", "figure")],
+         Output("score-histogram", "figure"),
+         Output("employment-bar-chart", "figure"),
+         Output("shap-importance-chart", "figure")],
         Input("initial-load-interval", "n_intervals")
     )
     def update_dashboard_stats(_):
-        print("DEBUG: update_dashboard_stats triggered")
-        print(f"DEBUG: df shape: {df.shape}")
-        if 'risk_category' in df.columns:
-            print(f"DEBUG: risk_category counts:\n{df['risk_category'].value_counts()}")
-        else:
-            print("DEBUG: risk_category column MISSING")
-            
-        print(f"DEBUG: employment_type info: {'Present' if 'employment_type' in df.columns else 'Missing'}")
-        
         try:
-            # Calculate stats
-            total_customers = len(df)
-            
-            low_risk_count = len(df[df['risk_category'] == 'Low'])
-            med_risk_count = len(df[df['risk_category'] == 'Medium'])
-            high_risk_count = len(df[df['risk_category'] == 'High'])
-            
-            # Estimate potential loss (Mock calculation: sum of loan_amount for high risk)
-            # Using a fixed average if loan_amount not present
-            if 'loan_amount' in df.columns:
-                potential_loss = df[df['risk_score'] > 600]['loan_amount'].sum()
+            total = len(df)
+
+            counts = {}
+            for band in BAND_COLORS:
+                counts[band] = len(df[df['risk_category'] == band])
+
+            at_risk = counts.get('MODERATE', 0) + counts.get('HIGH RISK', 0) + counts.get('CRITICAL', 0)
+            at_risk_pct = f"{at_risk / max(total, 1) * 100:.1f}% of portfolio"
+
+            # Potential exposure
+            if 'LoanAmount' in df.columns:
+                mask = df['risk_category'].isin(['MODERATE', 'HIGH RISK', 'CRITICAL'])
+                loss = df.loc[mask, 'LoanAmount'].sum()
             else:
-                 potential_loss = high_risk_count * 15000 # Mock average loan
-                 
-            # Format currency
-            loss_formatted = f"${potential_loss:,.0f}"
+                loss = at_risk * 15000
 
-            # Create Pie Chart
-            labels = ['Low Risk', 'Medium Risk', 'High Risk']
-            values = [low_risk_count, med_risk_count, high_risk_count]
-            colors = ['#00ff9d', '#ffaa00', '#FF0000'] # Success, Original Warning, Pure Red
+            if loss >= 1e7:
+                loss_str = f"₹{loss / 1e7:.1f}Cr"
+            elif loss >= 1e5:
+                loss_str = f"₹{loss / 1e5:.1f}L"
+            else:
+                loss_str = f"₹{loss:,.0f}"
 
-            fig_pie = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4, marker=dict(colors=colors))])
-            fig_pie.update_layout(
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-                font_color='white',
-                margin=dict(t=20, b=20, l=20, r=20),
-                showlegend=False
+            # Avg risk score
+            avg_score = df['risk_score'].mean() if 'risk_score' in df.columns else 0
+
+            # ── Donut Chart ──────────────────────────────────
+            labels = list(BAND_COLORS.keys())
+            values = [counts.get(b, 0) for b in labels]
+            colors = [BAND_COLORS[b] for b in labels]
+
+            fig_donut = go.Figure(data=[go.Pie(
+                labels=labels, values=values, hole=0.65,
+                marker=dict(colors=colors, line=dict(color='#ffffff', width=2)),
+                textinfo='none', hoverinfo='label+value+percent',
+                sort=False,
+            )])
+            fig_donut.update_layout(**_layout(margin=dict(t=8, b=8, l=8, r=8)))
+            # Add center text
+            fig_donut.add_annotation(
+                text=f"<b>{total:,}</b><br><span style='font-size:9px;color:#9ca3b4'>total</span>",
+                showarrow=False, font=dict(size=16, color='#1a1d2e')
             )
-            fig_pie.update_traces(textinfo='percent+label')
 
-            # Create Employment Bar Chart
+            # ── Score Histogram ──────────────────────────────
+            fig_hist = go.Figure()
+            if 'risk_score' in df.columns:
+                # Color each bar by risk band
+                bin_edges = [0, 25, 45, 60, 75, 100]
+                band_names = ['SAFE', 'LOW RISK', 'MODERATE', 'HIGH RISK', 'CRITICAL']
+                band_colors = [BAND_COLORS[b] for b in band_names]
+
+                for i in range(len(bin_edges) - 1):
+                    mask = (df['risk_score'] >= bin_edges[i]) & (df['risk_score'] <= bin_edges[i + 1])
+                    subset = df.loc[mask, 'risk_score']
+                    if len(subset) > 0:
+                        fig_hist.add_trace(go.Histogram(
+                            x=subset, name=band_names[i],
+                            marker_color=band_colors[i],
+                            opacity=0.85,
+                            xbins=dict(start=bin_edges[i], end=bin_edges[i + 1], size=5),
+                            hovertemplate=f"{band_names[i]}<br>Score: %{{x}}<br>Count: %{{y}}<extra></extra>"
+                        ))
+            fig_hist.update_layout(**_layout(
+                barmode='stack', xaxis_title=None, yaxis_title=None, bargap=0.08,
+            ))
+
+            # ── Employment Bar ───────────────────────────────
+            fig_emp = _empty_fig()
             if 'employment_type' in df.columns:
-                emp_counts = df['employment_type'].value_counts().reset_index()
-                emp_counts.columns = ['Employment Type', 'Count']
-                
-                fig_bar = px.bar(emp_counts, x='Employment Type', y='Count', 
-                                 color='Employment Type', # distinct colors
-                                 color_discrete_sequence=px.colors.qualitative.Pastel)
-                
-                fig_bar.update_layout(
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    font_color='white',
-                    margin=dict(t=20, b=20, l=20, r=20),
-                    showlegend=False,
-                    xaxis=dict(showgrid=False),
-                    yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.1)')
-                )
-            else:
-                print("DEBUG: 'employment_type' column missing in df")
-                fig_bar = go.Figure()
+                # Stacked bar by risk band
+                emp_types = df['employment_type'].unique()
+                for band in ['CRITICAL', 'HIGH RISK', 'MODERATE', 'LOW RISK', 'SAFE']:
+                    band_df = df[df['risk_category'] == band]
+                    emp_counts = band_df['employment_type'].value_counts()
+                    fig_emp.add_trace(go.Bar(
+                        x=[emp_counts.get(e, 0) for e in emp_types],
+                        y=emp_types, name=band,
+                        orientation='h',
+                        marker_color=BAND_COLORS[band],
+                        opacity=0.85,
+                        hovertemplate=f"{band}<br>%{{y}}: %{{x}}<extra></extra>"
+                    ))
+                fig_emp.update_layout(**_layout(barmode='stack'))
 
-            return f"{total_customers:,}", f"{high_risk_count}", loss_formatted, f"{low_risk_count}", f"{med_risk_count}", f"{high_risk_count}", fig_pie, fig_bar
+            # ── SHAP Feature Importance ──────────────────────
+            fig_shap = _empty_fig()
+            if not feat_imp.empty:
+                top = feat_imp.head(8).iloc[::-1]
+                imp_col = 'mean_abs_shap' if 'mean_abs_shap' in top.columns else 'importance'
+                max_val = top[imp_col].max()
+                normalized = top[imp_col] / max_val if max_val > 0 else top[imp_col]
 
+                fig_shap = go.Figure(go.Bar(
+                    x=top[imp_col], y=top['feature'],
+                    orientation='h',
+                    marker=dict(
+                        color=normalized,
+                        colorscale=[[0, '#b3d4fc'], [0.5, '#4a7cde'], [1, '#38a9d4']],
+                    ),
+                    hovertemplate="%{y}: %{x:.4f}<extra></extra>"
+                ))
+                fig_shap.update_layout(**_layout(
+                    yaxis=dict(gridcolor='rgba(0,0,0,0)', tickfont=dict(size=10)),
+                ))
+
+            return (
+                f"{total:,}",
+                f"{at_risk}",
+                at_risk_pct,
+                loss_str,
+                f"{avg_score:.1f}",
+                fig_donut,
+                fig_hist,
+                fig_emp,
+                fig_shap,
+            )
         except Exception as e:
-            print(f"CRITICAL ERROR in update_dashboard_stats: {e}")
-            import traceback
-            traceback.print_exc()
-            # Return safe fallbacks to avoid blank screen
-            return "Error", "Error", "Error", "0", "0", "0", go.Figure(), go.Figure()
-    
-    @app.callback(
-        [Output("low-risk-list", "children"),
-         Output("medium-risk-list", "children"),
-         Output("high-risk-list", "children"),
-         Output("btn-load-more-low", "style"),
-         Output("btn-load-more-med", "style"),
-         Output("btn-load-more-high", "style")],
-        [Input("initial-load-interval", "n_intervals"),
-         Input("btn-load-more-low", "n_clicks"),
-         Input("btn-load-more-med", "n_clicks"),
-         Input("btn-load-more-high", "n_clicks")]
-    )
-    def update_risk_lists(_, n_low, n_med, n_high):
-        print("DEBUG: update_risk_lists triggered")
-        try:
-            # Default n_clicks is None
-            limit_low = ((n_low or 0) + 1) * 20
-            limit_med = ((n_med or 0) + 1) * 20
-            limit_high = ((n_high or 0) + 1) * 20
+            print(f"ERROR in update_dashboard_stats: {e}")
+            import traceback; traceback.print_exc()
+            empty = _empty_fig()
+            return ("—", "—", "", "—", "—", empty, empty, empty, empty)
 
-            def generate_list(category, text_color, limit):
-                full_df = df[df['risk_category'] == category]
-                total_count = len(full_df)
-                filtered_df = full_df.head(limit)
-                
+    # ================================================================
+    # Risk Band Lists
+    # ================================================================
+    @app.callback(
+        [Output("safe-risk-list", "children"),
+         Output("low-risk-list", "children"),
+         Output("moderate-risk-list", "children"),
+         Output("high-risk-list", "children"),
+         Output("critical-risk-list", "children"),
+         Output("btn-load-more-safe", "style"),
+         Output("btn-load-more-low", "style"),
+         Output("btn-load-more-mod", "style"),
+         Output("btn-load-more-high", "style"),
+         Output("btn-load-more-critical", "style")],
+        [Input("initial-load-interval", "n_intervals"),
+         Input("btn-load-more-safe", "n_clicks"),
+         Input("btn-load-more-low", "n_clicks"),
+         Input("btn-load-more-mod", "n_clicks"),
+         Input("btn-load-more-high", "n_clicks"),
+         Input("btn-load-more-critical", "n_clicks")]
+    )
+    def update_risk_lists(_, n_safe, n_low, n_mod, n_high, n_crit):
+        try:
+            limits = {
+                'SAFE':      ((n_safe or 0) + 1) * 20,
+                'LOW RISK':  ((n_low or 0) + 1) * 20,
+                'MODERATE':  ((n_mod or 0) + 1) * 20,
+                'HIGH RISK': ((n_high or 0) + 1) * 20,
+                'CRITICAL':  ((n_crit or 0) + 1) * 20,
+            }
+
+            def make_list(category, color, limit):
+                full = df[df['risk_category'] == category]
+                if 'risk_score' in full.columns:
+                    full = full.sort_values('risk_score', ascending=False)
+                total_count = len(full)
+                subset = full.head(limit)
+
                 items = []
-                for i, (_, row) in enumerate(filtered_df.iterrows(), 1):
-                    customer_name = row.get('name', row['customer_id'])
-                    customer_id = row['customer_id']
+                for _, row in subset.iterrows():
+                    name = row.get('name', row[CUST_ID_COL])
+                    cid = row[CUST_ID_COL]
+                    score = row.get('risk_score', 0)
                     items.append(
                         html.Div([
-                            html.Span(f"{i}. {customer_name}", style={'color': '#ffffff', 'textShadow': '0 0 5px rgba(255, 255, 255, 0.5)'}, className="fw-bold"),
-                            html.Span(f" Score: {int(row['risk_score'])}", className="ms-2 text-muted small"),
-                            html.Hr(className="my-1 border-secondary")
-                        ], className="p-2 customer-list-item",
-                           id={'type': 'customer-item', 'index': customer_id},
-                           n_clicks=0,
-                           style={"cursor": "pointer", "transition": "background 0.2s"}) 
+                            html.Span(str(name), className="cust-name"),
+                            html.Span(f"{score:.0f}",
+                                      className="cust-score",
+                                      style={"color": color,
+                                             "background": f"{color}15"})
+                        ], className="customer-list-item d-flex justify-content-between align-items-center",
+                           id={'type': 'customer-item', 'index': cid},
+                           n_clicks=0)
                     )
-                
-                # Determine button visibility
-                btn_style = {'display': 'block'} if total_count > limit else {'display': 'none'}
-                
-                return items, btn_style
 
-            low_items, low_btn_style = generate_list('Low', 'text-success', limit_low)
-            med_items, med_btn_style = generate_list('Medium', 'text-warning', limit_med)
-            high_items, high_btn_style = generate_list('High', 'text-danger', limit_high)
+                btn = {'display': 'block'} if total_count > limit else {'display': 'none'}
+                return items, btn
 
-            return low_items, med_items, high_items, low_btn_style, med_btn_style, high_btn_style
+            results = []
+            for band in ['SAFE', 'LOW RISK', 'MODERATE', 'HIGH RISK', 'CRITICAL']:
+                items, btn = make_list(band, BAND_COLORS[band], limits[band])
+                results.append(items)
+                results.append(btn)
+
+            return (results[0], results[2], results[4], results[6], results[8],
+                    results[1], results[3], results[5], results[7], results[9])
 
         except Exception as e:
-            print(f"CRITICAL ERROR in update_risk_lists: {e}")
-            import traceback
-            traceback.print_exc()
-            return [], [], [], {'display': 'none'}, {'display': 'none'}, {'display': 'none'}
+            print(f"ERROR in update_risk_lists: {e}")
+            import traceback; traceback.print_exc()
+            hide = {'display': 'none'}
+            return ([], [], [], [], [], hide, hide, hide, hide, hide)
 
+    # ================================================================
+    # Customer Detail Modal
+    # ================================================================
     @app.callback(
         [Output("customer-detail-modal", "is_open"),
          Output("modal-content", "children")],
@@ -161,93 +273,257 @@ def register_callbacks(app):
     )
     def toggle_modal(n_clicks, is_open):
         try:
-            print(f"DEBUG: toggle_modal triggered. Triggered: {ctx.triggered}")
             if not ctx.triggered:
                 return False, no_update
-            
+
             button_id = ctx.triggered_id
-            print(f"DEBUG: Triggered ID: {button_id}")
-            
-            if not button_id or (isinstance(button_id, dict) and button_id.get('type') != 'customer-item'):
+            if not button_id or (isinstance(button_id, dict) and
+                                 button_id.get('type') != 'customer-item'):
                 return False, no_update
-                
+
             customer_id = button_id['index']
-            print(f"DEBUG: Customer ID clicked: {customer_id}, Type: {type(customer_id)}")
-            
-            # Robust DataFrame Lookup
-            mask = df['customer_id'] == customer_id
+
+            mask = df[CUST_ID_COL] == customer_id
             if not mask.any():
-                print(f"DEBUG: Direct match failed. Trying type conversion.")
-                # Try converting to string if it's an int, or vice versa
                 if isinstance(customer_id, int):
-                    mask = df['customer_id'] == str(customer_id)
+                    mask = df[CUST_ID_COL] == str(customer_id)
                 elif isinstance(customer_id, str) and customer_id.isdigit():
-                    mask = df['customer_id'] == int(customer_id)
-            
+                    mask = df[CUST_ID_COL] == int(customer_id)
             if not mask.any():
-                print(f"ERROR: Customer ID {customer_id} not found in DataFrame.")
-                return is_open, no_update # Keep current state
+                return is_open, no_update
 
-            customer_row = df[mask].iloc[0]
-            customer_name = customer_row.get('name', customer_id)
-            customer_risk = customer_row['risk_score']
+            row = df[mask].iloc[0]
+            name = row.get('name', customer_id)
+            score = row.get('risk_score', 0)
+            band = row.get('risk_category', 'UNKNOWN')
+            color = BAND_COLORS.get(band, '#5b8def')
 
-            # Timeline
+            # ── Timeline chart ───────────────────────────────
             timeline_df = get_customer_timeline(customer_id)
-            fig_timeline = px.line(timeline_df, x='date', y='balance', title="Account Balance History")
-            fig_timeline.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='white')
-            fig_timeline.update_traces(line_color='#2b7de9', line_width=3)
-            
-            # Spending
-            spending_df = get_spending_breakdown(customer_id)
-            fig_spending = px.bar(spending_df, x='category', y='amount', title="Monthly Spending")
-            fig_spending.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='white')
-            fig_spending.update_traces(marker_color='#ff007f')
+            fig_tl = go.Figure()
+            fig_tl.add_trace(go.Scatter(
+                x=timeline_df['date'], y=timeline_df['balance'],
+                mode='lines', fill='tozeroy',
+                line=dict(color='#4a7cde', width=1.5),
+                fillcolor='rgba(74, 124, 222, 0.08)',
+                hovertemplate="₹%{y:,.0f}<br>%{x|%b %d}<extra></extra>"
+            ))
+            fig_tl.update_layout(**_layout(margin=dict(t=8, b=30, l=50, r=16)))
 
-            # Risk Factors
+            # ── Spending chart ───────────────────────────────
+            spending_df = get_spending_breakdown(customer_id)
+            spending_df = spending_df.sort_values('amount', ascending=True)
+            fig_sp = go.Figure(go.Bar(
+                x=spending_df['amount'], y=spending_df['category'],
+                orientation='h',
+                marker=dict(
+                    color=spending_df['amount'],
+                    colorscale=[[0, '#b3d4fc'], [1, '#dc3545']],
+                ),
+                hovertemplate="₹%{x:,.0f}<extra></extra>"
+            ))
+            fig_sp.update_layout(**_layout(margin=dict(t=8, b=20, l=80, r=16)))
+
+            # ── Risk gauge ───────────────────────────────────
+            fig_gauge = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=score,
+                gauge=dict(
+                    axis=dict(range=[0, 100], tickfont=dict(size=10, color='#5f6477')),
+                    bar=dict(color=color),
+                    bgcolor='#f5f6fa',
+                    borderwidth=0,
+                    steps=[
+                        dict(range=[0, 25], color='rgba(52,211,153,0.15)'),
+                        dict(range=[25, 45], color='rgba(91,141,239,0.15)'),
+                        dict(range=[45, 60], color='rgba(245,158,11,0.15)'),
+                        dict(range=[60, 75], color='rgba(251,146,60,0.15)'),
+                        dict(range=[75, 100], color='rgba(239,68,68,0.15)'),
+                    ],
+                ),
+                number=dict(font=dict(size=28, color='#1a1d2e')),
+            ))
+            fig_gauge.update_layout(**_layout(
+                margin=dict(t=30, b=8, l=30, r=30), height=160,
+            ))
+
+            # ── Metrics ──────────────────────────────────────
+            metrics_data = [
+                ('Income', 'Income', '₹{:,.0f}'),
+                ('Loan', 'LoanAmount', '₹{:,.0f}'),
+                ('Credit Score', 'CreditScore', '{:.0f}'),
+                ('DTI', 'DTIRatio', '{:.1f}%'),
+                ('On-time Rate', 'ontime_payment_rate_12m', '{:.0%}'),
+                ('Savings', 'savings_rate', '{:.1f}%'),
+            ]
+            metric_items = []
+            for label, col, fmt in metrics_data:
+                if col in row.index and pd.notna(row[col]):
+                    try:
+                        val = fmt.format(row[col])
+                    except (ValueError, TypeError):
+                        val = str(row[col])
+                    metric_items.append(
+                        html.Div([
+                            html.Div(label, style={"fontSize": "0.7rem", "color": "#9ca3b4"}),
+                    html.Div(val, style={"fontSize": "0.95rem", "fontWeight": "600",
+                                          "color": "#1a1d2e"}),
+                        ], className="mb-2")
+                    )
+
+            # ── Intervention ─────────────────────────────────
+            interventions = {
+                'SAFE': ("No action needed", "success"),
+                'LOW RISK': ("Send wellness tips within 48h", "info"),
+                'MODERATE': ("Proactive outreach — offer restructuring", "warning"),
+                'HIGH RISK': ("Urgent call — restructuring + holiday", "danger"),
+                'CRITICAL': ("Immediate intervention — emergency loan", "danger"),
+            }
+            action_text, action_color = interventions.get(band, ("Monitor", "secondary"))
+
+            # ── Why This Score? ──────────────────────────────
+            # Evaluate key risk factors from the customer's data
             risk_factors = []
-            if customer_risk > 700:
-                risk_factors.append(html.Span("Likely Default", className="badge bg-danger p-2 me-2"))
-            if customer_risk > 500:
-                risk_factors.append(html.Span("Salary Delayed", className="badge bg-warning text-dark p-2 me-2"))
-            risk_factors.append(html.Span("High Utilization", className="badge bg-info p-2 me-2"))
-            
+
+            def _add_factor(label, col, thresholds, higher_is_worse=True, fmt='{:.1f}'):
+                """Add a risk factor with severity color.
+                thresholds: (good, fair, warning) — values at each boundary.
+                """
+                if col not in row.index or pd.isna(row[col]):
+                    return
+                val = row[col]
+                try:
+                    val_str = fmt.format(val)
+                except (ValueError, TypeError):
+                    val_str = str(val)
+
+                good_t, fair_t, warn_t = thresholds
+                if higher_is_worse:
+                    if val <= good_t:
+                        severity, sev_color, sev_label = 0, '#10b981', 'Good'
+                    elif val <= fair_t:
+                        severity, sev_color, sev_label = 1, '#e8930c', 'Fair'
+                    elif val <= warn_t:
+                        severity, sev_color, sev_label = 2, '#ea7830', 'Warning'
+                    else:
+                        severity, sev_color, sev_label = 3, '#dc3545', 'Critical'
+                else:
+                    if val >= good_t:
+                        severity, sev_color, sev_label = 0, '#10b981', 'Good'
+                    elif val >= fair_t:
+                        severity, sev_color, sev_label = 1, '#e8930c', 'Fair'
+                    elif val >= warn_t:
+                        severity, sev_color, sev_label = 2, '#ea7830', 'Warning'
+                    else:
+                        severity, sev_color, sev_label = 3, '#dc3545', 'Critical'
+
+                bar_pct = min(max((severity + 1) / 4 * 100, 15), 100)
+
+                risk_factors.append((severity, html.Div([
+                    html.Div([
+                        html.Span(label, style={"fontSize": "0.78rem", "color": "#5f6477",
+                                                "fontWeight": "500"}),
+                        html.Span([
+                            html.Span(val_str, style={"fontWeight": "600", "color": "#1a1d2e",
+                                                       "marginRight": "6px"}),
+                            html.Span(sev_label, style={"fontSize": "0.65rem", "color": sev_color,
+                                                         "fontWeight": "600",
+                                                         "padding": "1px 6px",
+                                                         "borderRadius": "4px",
+                                                         "background": f"{sev_color}15",
+                                                         "border": f"1px solid {sev_color}30"})
+                        ])
+                    ], className="d-flex justify-content-between align-items-center"),
+                    html.Div(
+                        html.Div(style={"width": f"{bar_pct}%", "height": "100%",
+                                        "borderRadius": "2px", "background": sev_color,
+                                        "transition": "width 0.5s ease"}),
+                        style={"height": "4px", "borderRadius": "2px",
+                               "background": "rgba(0,0,0,0.06)", "marginTop": "4px"}
+                    )
+                ], className="mb-2")))
+
+            # Key risk signals
+            _add_factor("DTI Ratio", "DTIRatio", (30, 45, 60), higher_is_worse=True, fmt='{:.1f}%')
+            _add_factor("Computed DTI", "computed_dti", (35, 50, 70), higher_is_worse=True, fmt='{:.1f}%')
+            _add_factor("Credit Score", "CreditScore", (750, 650, 550), higher_is_worse=False, fmt='{:.0f}')
+            _add_factor("On-time Payments", "ontime_payment_rate_12m", (0.95, 0.85, 0.70), higher_is_worse=False, fmt='{:.0%}')
+            _add_factor("Savings Rate", "savings_rate", (15, 8, 3), higher_is_worse=False, fmt='{:.1f}%')
+            _add_factor("Credit Utilization", "credit_utilization_ratio", (30, 60, 80), higher_is_worse=True, fmt='{:.0f}%')
+            _add_factor("Total Debt / Assets", "total_debt_to_assets", (0.4, 0.7, 0.9), higher_is_worse=True, fmt='{:.2f}')
+            _add_factor("Behavioral Risk", "behavioral_risk_score", (30, 50, 70), higher_is_worse=True, fmt='{:.0f}')
+            _add_factor("Peer Default Rate", "peer_default_rate", (0.05, 0.15, 0.30), higher_is_worse=True, fmt='{:.1%}')
+            _add_factor("Financial Stress", "financial_stress_score", (30, 50, 70), higher_is_worse=True, fmt='{:.0f}')
+            _add_factor("Employer Risk", "employer_risk_multiplier", (1.2, 1.5, 2.0), higher_is_worse=True, fmt='{:.2f}x')
+            _add_factor("Income Stability", "isi", (70, 50, 30), higher_is_worse=False, fmt='{:.0f}')
+
+            # Sort by severity (worst first) and take top factors
+            risk_factors.sort(key=lambda x: x[0], reverse=True)
+            factor_items = [item for _, item in risk_factors[:8]]
+
+            # Build "Why This Score?" section
+            why_section = html.Div([
+                html.Div("Why This Score?",
+                         style={"fontSize": "0.75rem", "fontWeight": "600", "color": "#9ca3b4",
+                                "textTransform": "uppercase", "letterSpacing": "0.5px",
+                                "marginBottom": "8px",
+                                "borderLeft": "3px solid #4a7cde",
+                                "paddingLeft": "8px"}),
+                html.Div(factor_items if factor_items else [
+                    html.Div("No detailed factor data available",
+                             style={"color": "#9ca3b4", "fontSize": "0.8rem"})
+                ])
+            ], style={"background": "rgba(255,255,255,0.3)", "borderRadius": "8px",
+                       "padding": "12px", "border": "1px solid rgba(0,0,0,0.04)"})
+
             modal_content = html.Div([
-                html.H4(f"Analysis for {customer_name}", className="text-white mb-4"),
+                # Header
+                html.Div([
+                    html.H5(name, className="mb-0",
+                            style={"fontWeight": "600", "color": "#1a1d2e"}),
+                    html.Span(band, className="risk-badge ms-3",
+                              style={"background": f"{color}20", "color": color,
+                                     "border": f"1px solid {color}40"})
+                ], className="d-flex align-items-center mb-3"),
+
                 dbc.Row([
+                    # Left: gauge + metrics
                     dbc.Col([
-                        dbc.Card([
-                            dbc.CardHeader("Financial Stress Timeline"),
-                            dbc.CardBody(dcc.Graph(figure=fig_timeline))
-                        ], className="glass-card mb-4")
-                    ], width=8),
+                        dcc.Graph(figure=fig_gauge, config={"displayModeBar": False},
+                                  style={"height": "160px"}),
+                        html.Div(metric_items, className="mt-2")
+                    ], width=3),
+
+                    # Center: Why This Score + Timeline
                     dbc.Col([
-                        dbc.Card([
-                            dbc.CardHeader("Spending Habits"),
-                            dbc.CardBody(dcc.Graph(figure=fig_spending))
-                        ], className="glass-card mb-4")
+                        why_section,
+                        html.Div("Balance History",
+                                 className="mt-3",
+                                 style={"fontSize": "0.75rem", "color": "#9ca3b4",
+                                        "marginBottom": "4px", "fontWeight": "500"}),
+                        dcc.Graph(figure=fig_tl, config={"displayModeBar": False},
+                                  style={"height": "160px"}),
+                    ], width=5),
+
+                    # Right: spending
+                    dbc.Col([
+                        html.Div("Monthly Spending",
+                                 style={"fontSize": "0.75rem", "color": "#9ca3b4",
+                                        "marginBottom": "4px", "fontWeight": "500"}),
+                        dcc.Graph(figure=fig_sp, config={"displayModeBar": False},
+                                  style={"height": "200px"}),
                     ], width=4),
                 ]),
-                dbc.Row([
-                    dbc.Col([
-                        html.H5("Detected Risk Factors", className="mb-3"),
-                        html.Div(risk_factors, className="d-flex flex-wrap mb-4")
-                    ], width=6),
-                    dbc.Col([
-                        html.H5("Recommended Actions", className="mb-3"),
-                        html.Div([
-                            dbc.Button("Offer Payment Holiday", color="success", className="me-2"),
-                            dbc.Button("Contact Customer", color="info", className="me-2"),
-                            dbc.Button("Flag for Review", color="warning")
-                        ])
-                    ], width=6)
-                ])
+
+                # Action
+                dbc.Alert(action_text, color=action_color,
+                          className="mt-3 mb-0",
+                          style={"fontSize": "0.85rem", "borderRadius": "8px"})
             ])
-            
+
             return True, modal_content
 
         except Exception as e:
-            print(f"CRITICAL ERROR in toggle_modal: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"ERROR in toggle_modal: {e}")
+            import traceback; traceback.print_exc()
             return is_open, no_update

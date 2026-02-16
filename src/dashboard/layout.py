@@ -1,140 +1,176 @@
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 
+
+def _kpi_card(title, value_id, color='#e8eaed', subtitle_id=None, icon=None):
+    """Minimal KPI card with optional icon and subtitle."""
+    body = [
+        html.Div(className="kpi-label", children=title),
+        html.Div(id=value_id, className="kpi-value mt-1", style={"color": color}),
+    ]
+    if subtitle_id:
+        body.append(html.Div(id=subtitle_id, className="kpi-delta mt-1"))
+    return dbc.Card(dbc.CardBody(body, className="py-3 px-3"), className="glass-card")
+
+
+def _band_column(band_name, css_class, list_id, btn_id, width=2):
+    """Risk band column with header + scrollable customer list."""
+    return dbc.Col([
+        html.Div(band_name, className=f"band-header {css_class}"),
+        html.Div([
+            html.Div(id=list_id),
+            dbc.Button("Load more", id=btn_id,
+                       className="btn-subtle w-100 mt-2",
+                       style={"display": "none"})
+        ], className="scrollable-list",
+           style={"maxHeight": "400px", "overflowY": "auto"})
+    ], width=width)
+
+
 def create_layout(app):
     navbar = dbc.NavbarSimple(
         brand=html.Div([
             html.Div(
-                html.I(className="bi bi-shield-fill-exclamation"),
+                html.I(className="bi bi-shield-check"),
                 className="d-flex justify-content-center align-items-center me-2",
                 style={
-                    "height": "40px",
-                    "width": "40px",
-                    "borderRadius": "50%",
-                    "background": "linear-gradient(135deg, #0dcaf0 0%, #0d6efd 100%)",
-                    "color": "white",
-                    "fontSize": "1.2rem"
+                    "height": "32px", "width": "32px",
+                    "borderRadius": "8px",
+                    "background": "linear-gradient(135deg, #5b8def, #56ccf2)",
+                    "color": "white", "fontSize": "0.9rem"
                 }
             ),
-            html.Span("Pre-Delinquency Intervention Engine", style={"fontWeight": "bold", "letterSpacing": "1px"})
+            html.Span("Pre-Delinquency Engine",
+                       style={"fontWeight": "600", "fontSize": "0.9rem",
+                              "letterSpacing": "0.3px"})
         ], className="d-flex align-items-center"),
         brand_href="#",
-        color="#2c3034",  # Lighter than black, dark gray (Material Dark)
-        dark=True,
+        color="white",
+        dark=False,
         fluid=True,
-        brand_style={'fontSize': '1.1rem'}
     )
 
     return html.Div([
         navbar,
         dbc.Container([
+
+            # ═══════════════════════════════════════════════════
+            # ROW 1: Portfolio Overview  (KPIs + Donut)
+            # Admin sees the big picture at a glance
+            # ═══════════════════════════════════════════════════
+            html.Div("Portfolio Overview",
+                     className="section-title mt-3 mb-2"),
+
             dbc.Row([
+                # Left: 4 KPI cards in a 2×2 grid
                 dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("Total Customers", id="kpi-total-tooltip-target"),
-                        dbc.Tooltip("Total number of active customers in the database.", target="kpi-total-tooltip-target", placement="top"),
-                        dbc.CardBody([
-                            html.Div([
-                                html.H3("1,245", id="total-customers", className="mb-0", style={"color": "#2b7de9"}), # Custom blue between dark and light
-                                html.Small("Active", className="text-muted")
-                            ], className="d-flex flex-column"),
-                            
-                            html.Div([
-                                html.Div([html.Span("●", className="text-success me-1"), html.Span("Low:", className="text-success me-1"), html.Span("0", id="breakdown-low")], className="d-flex align-items-center small"),
-                                html.Div([html.Span("●", className="text-warning me-1"), html.Span("Med:", className="text-warning me-1"), html.Span("0", id="breakdown-med")], className="d-flex align-items-center small"),
-                                html.Div([html.Span("●", className="text-danger me-1"), html.Span("High:", className="text-danger me-1"), html.Span("0", id="breakdown-high")], className="d-flex align-items-center small"),
-                            ], className="border-start border-secondary ps-3 ms-3")
-                        ], className="d-flex justify-content-between align-items-center")
-                    ], className="glass-card mb-4"),
-                    
-                    dbc.Card([
-                        dbc.CardHeader("High Risk Count", id="kpi-risk-tooltip-target", style={"cursor": "help"}),
-                        dbc.Tooltip("Number of customers with a Risk Score > 600 (Likely to default).", target="kpi-risk-tooltip-target", placement="top"),
-                        dbc.CardBody(html.H3("143", id="high-risk-count", className="text-danger"))
-                    ], className="glass-card mb-4")
-                ], width=4),
+                    dbc.Row([
+                        dbc.Col(_kpi_card("Total Customers", "total-customers",
+                                         "#e8eaed"), width=6),
+                        dbc.Col(_kpi_card("At Risk", "high-risk-count",
+                                         "#ef4444", subtitle_id="at-risk-pct"),
+                                width=6),
+                    ], className="g-3 mb-3"),
+                    dbc.Row([
+                        dbc.Col(_kpi_card("Potential Exposure", "potential-loss",
+                                         "#f59e0b"), width=6),
+                        dbc.Col(_kpi_card("Avg Risk Score", "avg-risk-score",
+                                         "#5b8def"), width=6),
+                    ], className="g-3"),
+                ], width=5),
 
-                 dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("Potential Loss", id="kpi-loss-tooltip-target"),
-                         dbc.Tooltip("Estimated total exposure from high-risk accounts.", target="kpi-loss-tooltip-target", placement="top"),
-                        dbc.CardBody(html.H3("$1.2M", id="potential-loss", className="text-warning"))
-                    ], className="glass-card mb-4"),
-                    
-                    dbc.Card([
-                        dbc.CardHeader("Intervention Success", id="kpi-success-tooltip-target"),
-                        dbc.Tooltip("Percentage of high-risk customers recovered after intervention.", target="kpi-success-tooltip-target", placement="top"),
-                        dbc.CardBody(html.H3("84%", id="intervention-success", className="text-success"))
-                    ], className="glass-card mb-4")
-                ], width=4),
-
-                dbc.Col([
+                # Center: Risk distribution donut (the key visual)
+                dbc.Col(
                     dbc.Card([
                         dbc.CardHeader("Risk Distribution"),
-                        dbc.CardBody(dcc.Graph(id="risk-distribution-chart", style={"height": "250px"}))
-                    ], className="glass-card mb-4 full-height")
-                ], width=4),
-            ], className="mt-4 mb-2"), 
+                        dbc.CardBody(
+                            dcc.Graph(id="risk-distribution-chart",
+                                      config={"displayModeBar": False},
+                                      style={"height": "180px"}),
+                            className="p-1"
+                        )
+                    ], className="glass-card chart-card h-100"),
+                    width=3
+                ),
+
+                # Right: Score histogram (distribution detail)
+                dbc.Col(
+                    dbc.Card([
+                        dbc.CardHeader("Score Distribution"),
+                        dbc.CardBody(
+                            dcc.Graph(id="score-histogram",
+                                      config={"displayModeBar": False},
+                                      style={"height": "180px"}),
+                            className="p-1"
+                        )
+                    ], className="glass-card chart-card h-100"),
+                    width=4
+                ),
+            ], className="g-3"),
+
+            # ═══════════════════════════════════════════════════
+            # ROW 2: Analysis  (Employment + Risk Drivers)
+            # Admin understands WHY risk exists
+            # ═══════════════════════════════════════════════════
+            html.Div("Risk Analysis",
+                     className="section-title mt-4 mb-2"),
 
             dbc.Row([
-                dbc.Col([
+                dbc.Col(
                     dbc.Card([
-                         dbc.CardHeader("Employment Demographics", className="glass-header"),
-                         dbc.CardBody(dcc.Graph(id="employment-bar-chart", style={"height": "200px"}))
-                    ], className="glass-card mb-4")
-                ], width=6),
-            ], className="mb-4"),
+                        dbc.CardHeader("Risk by Employment Type"),
+                        dbc.CardBody(
+                            dcc.Graph(id="employment-bar-chart",
+                                      config={"displayModeBar": False},
+                                      style={"height": "230px"}),
+                            className="p-1"
+                        )
+                    ], className="glass-card chart-card"), width=6
+                ),
+                dbc.Col(
+                    dbc.Card([
+                        dbc.CardHeader("Top Risk Drivers"),
+                        dbc.CardBody(
+                            dcc.Graph(id="shap-importance-chart",
+                                      config={"displayModeBar": False},
+                                      style={"height": "230px"}),
+                            className="p-1"
+                        )
+                    ], className="glass-card chart-card"), width=6
+                ),
+            ], className="g-3"),
 
-            # ... (KPI Row Code which is largely unchanged, skipping to Risk List Row)
-
-            # ... 
+            # ═══════════════════════════════════════════════════
+            # ROW 3: Customer Segmentation  (5 band columns)
+            # Admin drills into individual customers
+            # ═══════════════════════════════════════════════════
+            html.Div("Customer Segmentation",
+                     className="section-title mt-4 mb-2"),
 
             dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("Low Risk Customers", className="glass-header text-success glow-border-success mb-4"),
-                        dbc.CardBody(
-                            html.Div([
-                                html.Div(id="low-risk-list"),
-                                dbc.Button("See More...", id="btn-load-more-low", color="link", className="text-decoration-none text-success w-100 p-2")
-                            ], className="scrollable-list", style={"maxHeight": "400px", "overflowY": "auto"})
-                        , className="glass-body-container glow-border-success p-0")
-                    ], className="transparent-card full-height")
-                ], width=4),
-                
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("Medium Risk Customers", className="glass-header text-warning glow-border-warning mb-4"),
-                        dbc.CardBody(
-                            html.Div([
-                                html.Div(id="medium-risk-list"),
-                                dbc.Button("See More...", id="btn-load-more-med", color="link", className="text-decoration-none text-warning w-100 p-2")
-                            ], className="scrollable-list", style={"maxHeight": "400px", "overflowY": "auto"})
-                        , className="glass-body-container glow-border-warning p-0")
-                    ], className="transparent-card full-height")
-                ], width=4),
-                
-                 dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader("High Risk Customers", className="glass-header text-danger glow-border-danger mb-4"),
-                        dbc.CardBody(
-                            html.Div([
-                                html.Div(id="high-risk-list"),
-                                dbc.Button("See More...", id="btn-load-more-high", color="link", className="text-decoration-none text-danger w-100 p-2")
-                            ], className="scrollable-list", style={"maxHeight": "400px", "overflowY": "auto"})
-                        , className="glass-body-container glow-border-danger p-0")
-                    ], className="transparent-card full-height")
-                ], width=4),
-            ], className="mb-4"),
-            
-            # Modal for Customer Details
+                _band_column("Safe",     "band-safe", "safe-risk-list",
+                             "btn-load-more-safe", width=2),
+                _band_column("Low Risk", "band-low",  "low-risk-list",
+                             "btn-load-more-low", width=2),
+                _band_column("Moderate", "band-mod",  "moderate-risk-list",
+                             "btn-load-more-mod", width=3),
+                _band_column("High",     "band-high", "high-risk-list",
+                             "btn-load-more-high", width=3),
+                _band_column("Critical", "band-crit", "critical-risk-list",
+                             "btn-load-more-critical", width=2),
+            ], className="g-3 mb-4"),
+
+            # Modal for customer details
             dbc.Modal([
-                dbc.ModalHeader(dbc.ModalTitle("Customer Details"), className="glass-header", style={"borderBottom": "1px solid rgba(255,255,255,0.1)"}),
-                dbc.ModalBody(id="modal-content", className="glass-body-container", style={"borderRadius": "0 0 10px 10px"})
-            ], id="customer-detail-modal", size="xl", is_open=False, style={"backdropFilter": "blur(5px)"}),
-            
-            # Initialization Trigger
-            dcc.Interval(id='initial-load-interval', interval=100, max_intervals=1)
-            
-        ], fluid=True, className="p-4 dashboard-container")
+                dbc.ModalHeader(
+                    dbc.ModalTitle("Customer Details",
+                                  style={"fontSize": "1rem"})),
+                dbc.ModalBody(id="modal-content")
+            ], id="customer-detail-modal", size="xl", is_open=False),
+
+            # Data trigger
+            dcc.Interval(id='initial-load-interval', interval=100,
+                         max_intervals=1)
+
+        ], fluid=True, className="px-4 pb-4 dashboard-container")
     ])
